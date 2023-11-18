@@ -1,6 +1,8 @@
 # terraform-hcloud-lava-node
-Deploy LAVA node on Hetzner
+This project is distinct from the Lab Automation Validation Architecture (LAVA) and focuses on blockchain and multi-chain RPC functionalities.
+https://www.lavanet.xyz/
 
+# Deploy LAVA node on Hetzner
 
 ## Requirements to configure a LAVA integration
 The requirements to configure a LAVA integration include:

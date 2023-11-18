@@ -1,0 +1,189 @@
+#cloud-config
+users:
+  - name: devops
+    groups: users, admin
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-rsa <key>
+package_update: true
+package_upgrade: true
+packages:
+  - vim
+  - ca-certificates
+  - curl
+  - gnupg
+  - wget
+  - lz4
+write_files:
+  - path: /bin/docker-up
+    content: |
+        #!/usr/bin/bash
+        docker-compose up -d
+  - path: /etc/systemd/system/docker-up.service
+    content: |
+        [Unit]
+        Description=LAVA NODE Startup
+
+        [Service]
+        Type=simple
+        ExecStart=/bin/docker-up
+        WorkingDirectory=/opt/service
+
+        [Install]
+        WantedBy=default.target
+  - path: /etc/profile.d/service-env.sh
+    content: |
+      export APP_VERSION=${version}
+  - path: /opt/service/docker-compose.yml
+    content: |
+        ---
+        version: '3.9'
+        services:
+          lava-cache:
+            container_name: lava-cache
+            image: svetekllc/lava:${version}-cache
+            env_file:
+              - cache.env
+            ports:
+              - '23101:23101'
+            volumes:
+              - /etc/localtime:/etc/localtime:ro
+              - /etc/timezone:/etc/timezone:ro
+            logging:
+              driver: "json-file"
+              options:
+                max-size: "100m"
+                max-file: "1"
+            #deploy:
+            #  resources:
+            #    limits:
+            #      cpus: '4'
+            #      memory: '8gb'
+            networks:
+              - lava
+            restart: unless-stopped
+
+          lava-node:
+            container_name: lava-node
+            image: svetekllc/lava:${version}-validator
+            env_file:
+              - node.env
+            ports:
+              - '23656:23656'
+              - '23660:23660'
+            volumes:
+              - ./volumes/lava_root:/root/.lava
+              - /etc/localtime:/etc/localtime:ro
+              - /etc/timezone:/etc/timezone:ro
+            logging:
+              driver: "json-file"
+              options:
+                max-size: "100m"
+                max-file: "1"
+            #deploy:
+            #  resources:
+            #    limits:
+            #      cpus: '4'
+            #      memory: '16gb'
+            networks:
+              - lava
+            restart: unless-stopped
+
+          lava-provider:
+            container_name: lava-provider
+            image: svetekllc/lava:${version}-provider
+            env_file:
+              - provider.env
+            ports:
+              - '23001:23001'
+            volumes:
+              - ./volumes/lava_root:/root/.lava
+              - /etc/localtime:/etc/localtime:ro
+              - /etc/timezone:/etc/timezone:ro
+            logging:
+              driver: "json-file"
+              options:
+                max-size: "100m"
+                max-file: "1"
+            #deploy:
+            #  resources:
+            #    limits:
+            #      cpus: '4'
+            #      memory: '16gb'
+            networks:
+              - lava
+              - cosmos
+              - starknet
+            restart: unless-stopped
+
+        networks:
+          lava:
+            name: lava
+          cosmos:
+            name: cosmos
+          starknet:
+            name: starknet
+  - path: /opt/service/provider.env
+    content: |
+        # Provider variables
+        CACHE_ENABLE=true
+        CACHE_ADDRESS=
+        CACHE_PORT=
+        CHAIN_ID=${lava_chain_id}
+        CONFIG_PATH=/root/.lava
+        GEOLOCATION=2
+        KEY=${keyring_name}
+        KEYRING=${keyring_backend}
+        KEYALGO=eth_secp256k1
+        LOGLEVEL=info
+        MONIKER=${moniker}
+        PROMETHEUS_PORT=23001
+        REWARDS_STORAGE_DIR=rewards-storage
+        RPC=http://lava-node:26657
+        TOTAL_CONNECTIONS=10
+  - path: /opt/service/cache.env
+    content: |
+        # Validator variables
+        CACHE_LISTEN_ADDRESS=0.0.0.0
+        CACHE_PORT=23100
+        METRICS_LISTEN_ADDRESS=0.0.0.0
+        METRICS_PORT=23101
+        LOGLEVEL=info
+  - path: /opt/service/node.env
+    content: |
+        # Validator variables
+        ADDRBOOK_URL=""
+        CHAIN_ID=${lava_chain_id}
+        CONFIG_PATH="/root/.lava"
+        DIFF_HEIGHT=1000
+        GENESIS_URL=https://raw.githubusercontent.com/lavanet/lava-config/main/${lava_network}/genesis_json/genesis.json
+        KEY=${keyring_name}
+        KEYRING=${keyring_backend}
+        KEYALGO=eth_secp256k1
+        LOGLEVEL=info
+        MONIKER=${moniker}
+        PEERS=${lava_peers}
+        RPC=${lava_rpc}
+        PROMETHEUS_PORT=36660
+        P2P_PORT=36656
+        SEEDS=${lava_seeds}
+        STATE_SYNC="false"
+        TOKEN=lava
+runcmd:
+  - echo '${opt} /opt/service/volumes xfs discard,nofail,defaults 0 0' >> /etc/fstab
+  - mkdir -p /opt/service/volumes && mount /opt/service/volumes
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  - chmod a+r /etc/apt/keyrings/docker.gpg
+  - echo "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  - apt update && apt -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - wget https://github.com/docker/compose/releases/download/v2.22.0/docker-compose-linux-x86_64
+  - mv docker-compose-linux-x86_64 /bin/docker-compose && chmod a+x /bin/docker-compose
+  - echo 'vm.overcommit_memory = 1' >> /etc/sysctl.conf
+  - chmod u+x /bin/docker-up
+  - mkdir -p /opt/service/volumes/lava_root
+  - curl -L https://snapshots.kjnodes.com/lava-testnet/snapshot_latest.tar.lz4 | tar -Ilz4 -xf - -C /opt/service/volumes/lava_root/
+  - systemctl enable docker
+  - systemctl daemon-reload && systemctl enable docker-up.service
+  - shutdown -r now

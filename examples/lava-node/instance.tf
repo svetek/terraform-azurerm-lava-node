@@ -4,9 +4,9 @@ variable "hcloud_token" {
 }
 
 module "lava-node" {
-  source         = "../../"
-#  source         = "Svetek/lava-node/hcloud"
-#  version        = "0.0.1" # Set last module version
+#  source         = "../../"
+  source         = "svetek/lava-node/hcloud"
+  version        = "0.1.11" # Set last module version
 
   hcloud_token   = var.hcloud_token
   service_name   = "lava-node"
